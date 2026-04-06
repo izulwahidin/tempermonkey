@@ -1,0 +1,99 @@
+// ==UserScript==
+// @name         WebReport Print - FINAL FIX
+// @namespace    izul/webreport-tools
+// @version      3.0
+// @description  Force inject button and capture data
+// @match        https://webreport.bmsecure.id/transaksi*
+// @run-at       document-start
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    const TARGET_HOST = 'api-webreport.bmsecure.id';
+    let interceptedData = null;
+
+    // 1. Intercept Fetch (Data & URL Rewriting)
+    const _fetch = window.fetch;
+    window.fetch = async function(...args) {
+        let url = (args[0] instanceof Request) ? args[0].url : args[0];
+
+        if (url.includes(TARGET_HOST)) {
+            const u = new URL(url, location.href);
+            u.searchParams.set('limit', '1000');
+            u.searchParams.set('offset', '0');
+            url = u.href;
+            if (args[0] instanceof Request) args[0] = new Request(url, args[0]);
+            else args[0] = url;
+        }
+
+        const res = await _fetch.apply(this, args);
+
+        if (url.includes(TARGET_HOST)) {
+            res.clone().json().then(data => {
+                if (data && data.response_data) {
+                    interceptedData = data;
+                    console.log('%c[WebReport] DATA READY!', 'background: #222; color: #bada55; padding: 5px; font-size: 12px;');
+                }
+            }).catch(() => {});
+        }
+        return res;
+    };
+
+    // 2. UI Creation with Force Style
+    function createButton() {
+        if (document.getElementById("btn-print-bulk")) return;
+
+        const btn = document.createElement("button");
+        btn.id = "btn-print-bulk";
+        btn.innerHTML = "🖨️ PRINT SEMUA STRUK";
+
+        // CSS Injected via Text for better compatibility
+        btn.setAttribute('style', `
+            position: fixed !important;
+            bottom: 20px !important;
+            left: 20px !important;
+            z-index: 2147483647 !important;
+            display: block !important;
+            padding: 15px 25px !important;
+            background-color: #f39c12 !important;
+            color: #fff !important;
+            border: 3px solid #fff !important;
+            border-radius: 12px !important;
+            font-weight: bold !important;
+            font-family: sans-serif !important;
+            cursor: pointer !important;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5) !important;
+            font-size: 14px !important;
+        `);
+
+        btn.onclick = () => {
+            if (!interceptedData) {
+                alert("Data belum tertangkap. Klik tombol 'Cari' di web dulu.");
+                return;
+            }
+            const ids = interceptedData.response_data.map(e => String(e.id_transaksi).trim());
+            const base64 = btoa(JSON.stringify(ids));
+            window.open(`https://bulk-fastpay-print.surge.sh/?ids=${base64}`, "_blank");
+        };
+
+        (document.body || document.documentElement).appendChild(btn);
+    }
+
+    // 3. Robust Injection (Cek setiap 1 detik & saat DOM berubah)
+    setInterval(createButton, 1000);
+
+    // Patch XHR juga untuk jaga-jaga
+    const _open = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(m, url) {
+        if (url.includes(TARGET_HOST)) {
+            const u = new URL(url, location.href);
+            u.searchParams.set('limit', '1000');
+            u.searchParams.set('offset', '0');
+            url = u.href;
+        }
+        return _open.apply(this, arguments);
+    };
+
+})();
